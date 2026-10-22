@@ -36,12 +36,15 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.claudetv.hub.ui.components.FocusRestore
 import com.claudetv.hub.ui.components.LocalFocusRestore
+import com.claudetv.hub.ui.components.glass
 import com.claudetv.hub.ui.screens.DetailsScreen
 import com.claudetv.hub.ui.screens.HomeScreen
+import com.claudetv.hub.ui.screens.LibraryScreen
+import com.claudetv.hub.ui.screens.PlayerScreen
+import com.claudetv.hub.ui.screens.PlexDetailsScreen
+import com.claudetv.hub.ui.screens.PlexLinkScreen
 import com.claudetv.hub.ui.screens.SearchScreen
-import com.claudetv.hub.ui.screens.ServicesScreen
 import com.claudetv.hub.ui.screens.SettingsScreen
-import com.claudetv.hub.ui.screens.WatchlistScreen
 import com.claudetv.hub.ui.theme.Motion
 import com.claudetv.hub.ui.theme.Palette
 import com.claudetv.hub.ui.theme.Type
@@ -50,19 +53,21 @@ import com.claudetv.hub.ui.theme.Type
 fun ClaudeTvApp(vm: AppViewModel) {
     val tab by vm.tab.collectAsState()
     val details by vm.detailsStack.collectAsState()
+    val overlay by vm.overlay.collectAsState()
     val toast by vm.toast.collectAsState()
     val restore by vm.restoreFocus.collectAsState()
     var homeChrome by remember { mutableStateOf(true) }
 
-    // Back: close details, else return to Home, else let the system leave the app.
-    BackHandler(enabled = details.isNotEmpty() || tab != Tab.HOME) {
-        if (!vm.closeDetails()) vm.selectTab(Tab.HOME)
+    // Back: close the top layer, else return to Home, else let the system leave the app.
+    // (The player registers its own handler, which wins while it's showing.)
+    BackHandler(enabled = overlay != null || details.isNotEmpty() || tab != Tab.HOME) {
+        if (!vm.closeTop()) vm.selectTab(Tab.HOME)
     }
 
-    val navVisible = details.isEmpty() && (tab != Tab.HOME || homeChrome)
+    val navVisible = overlay == null && details.isEmpty() && (tab != Tab.HOME || homeChrome)
 
     CompositionLocalProvider(
-        LocalFocusRestore provides FocusRestore(if (details.isEmpty()) restore else null) { vm.consumeRestoreFocus() },
+        LocalFocusRestore provides FocusRestore(if (overlay == null && details.isEmpty()) restore else null) { vm.consumeRestoreFocus() },
     ) {
         Box(Modifier.fillMaxSize().background(Palette.Background)) {
             AnimatedContent(
@@ -71,10 +76,9 @@ fun ClaudeTvApp(vm: AppViewModel) {
                 label = "tab",
             ) { t ->
                 when (t) {
-                    Tab.HOME -> HomeScreen(vm, onChromeVisible = { homeChrome = it }, handlesBack = details.isEmpty())
+                    Tab.HOME -> HomeScreen(vm, onChromeVisible = { homeChrome = it }, handlesBack = details.isEmpty() && overlay == null)
+                    Tab.LIBRARY -> LibraryScreen(vm)
                     Tab.SEARCH -> SearchScreen(vm)
-                    Tab.WATCHLIST -> WatchlistScreen(vm)
-                    Tab.SERVICES -> ServicesScreen(vm)
                     Tab.SETTINGS -> SettingsScreen(vm)
                 }
             }
@@ -97,8 +101,26 @@ fun ClaudeTvApp(vm: AppViewModel) {
                 },
                 contentKey = { it?.key },
                 label = "details",
-            ) { title ->
-                if (title != null) DetailsScreen(vm, title)
+            ) { d ->
+                when (d) {
+                    is Detail.Stream -> DetailsScreen(vm, d.title)
+                    is Detail.Plex -> PlexDetailsScreen(vm, d.item)
+                    null -> {}
+                }
+            }
+
+            // Sign-in and the player sit above everything.
+            AnimatedContent(
+                targetState = overlay,
+                transitionSpec = { fadeIn(tween(350)).togetherWith(fadeOut(tween(250))) },
+                contentKey = { o -> when (o) { is Overlay.Player -> "player"; Overlay.PlexLink -> "link"; null -> "none" } },
+                label = "overlay",
+            ) { o ->
+                when (o) {
+                    is Overlay.Player -> PlayerScreen(vm, o.request)
+                    Overlay.PlexLink -> PlexLinkScreen(vm)
+                    null -> {}
+                }
             }
 
             AnimatedVisibility(
@@ -111,7 +133,8 @@ fun ClaudeTvApp(vm: AppViewModel) {
                     toast.orEmpty(),
                     style = Type.Meta.copy(color = Palette.TextPrimary),
                     modifier = Modifier
-                        .background(Palette.SurfaceRaised.copy(alpha = 0.96f), RoundedCornerShape(50))
+                        .background(Palette.SurfaceRaised.copy(alpha = 0.80f), RoundedCornerShape(50))
+                        .glass(RoundedCornerShape(50), tint = 0.06f)
                         .padding(horizontal = 22.dp, vertical = 12.dp),
                 )
             }
@@ -125,7 +148,8 @@ private fun TopNav(selected: Tab, onSelect: (Tab) -> Unit) {
     Box(Modifier.fillMaxWidth().padding(top = 22.dp), contentAlignment = Alignment.Center) {
         Row(
             Modifier
-                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(50))
+                .glass(RoundedCornerShape(50), tint = 0.06f)
                 .padding(5.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {

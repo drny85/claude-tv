@@ -34,6 +34,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.claudetv.hub.BuildConfig
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Color
+import com.claudetv.hub.data.StreamingService
+import com.claudetv.hub.data.plex.PlexState
+import com.claudetv.hub.platform.AppLauncher
 import com.claudetv.hub.ui.AppViewModel
 import com.claudetv.hub.ui.components.Chip
 import com.claudetv.hub.ui.components.FormatBadge
@@ -56,6 +61,8 @@ fun SettingsScreen(vm: AppViewModel) {
     val apiKey by vm.apiKey.collectAsState()
     val region by vm.region.collectAsState()
     val isLive by vm.isLive.collectAsState()
+    val plexState by vm.plexState.collectAsState()
+    val subs by vm.subscriptions.collectAsState()
     var editingKey by remember { mutableStateOf(false) }
 
     if (editingKey) {
@@ -64,6 +71,7 @@ fun SettingsScreen(vm: AppViewModel) {
     }
 
     val first = remember { FocusRequester() }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val keySource = when {
         apiKey.isNotBlank() -> "Live catalog · using the key you entered"
         BuildConfig.TMDB_API_KEY.isNotBlank() -> "Live catalog · using the key built into this app"
@@ -78,6 +86,57 @@ fun SettingsScreen(vm: AppViewModel) {
         ) {
             item { Text("Settings", style = Type.ScreenTitle) }
 
+            item { SectionHeader("Plex", null, gap = 4.dp) }
+            item {
+                val ps = plexState
+                ToggleRow(
+                    label = when (ps) {
+                        is PlexState.Connected -> ps.server.name
+                        is PlexState.Connecting -> "Connecting…"
+                        else -> "Connect Plex"
+                    },
+                    detail = when (ps) {
+                        is PlexState.Connected -> "Connected · ${if (ps.server.baseUrl.contains(".plex.direct") || ps.server.baseUrl.startsWith("http://")) "streaming from your server" else "via relay"}"
+                        is PlexState.Error -> ps.message
+                        is PlexState.ChooseServer -> "Choose which server to use"
+                        is PlexState.Connecting -> null
+                        else -> "Sign in with a code at plex.tv/link"
+                    },
+                    checked = null,
+                    trailingText = if (ps is PlexState.Connected) "Switch server" else "Set up",
+                    onClick = { if (ps is PlexState.Connected) vm.switchPlexServer() else vm.startPlexLink() },
+                    modifier = Modifier.fillMaxWidth().focusRequester(first),
+                )
+            }
+            if (plexState !is PlexState.SignedOut) {
+                item {
+                    ToggleRow(
+                        label = "Sign out of Plex",
+                        detail = null,
+                        checked = null,
+                        onClick = vm::signOutPlex,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            item { SectionHeader("Streaming services you pay for", "Discovery and Play buttons prioritize what's included", Modifier.padding(top = 10.dp), gap = 4.dp) }
+            items(StreamingService.subscribable, key = { it.name }) { svc ->
+                ToggleRow(
+                    label = svc.displayName,
+                    detail = (if (AppLauncher.installedPackage(context, svc) != null) "App installed" else "App not installed") +
+                        "  ·  up to " + svc.formats.sortedBy { it.ordinal }.joinToString(", ") { it.label },
+                    checked = svc in subs,
+                    onClick = { vm.toggleSubscription(svc) },
+                    leading = {
+                        Box(Modifier.size(28.dp).background(Color(svc.brandColor), RoundedCornerShape(8.dp)))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            item { SectionHeader("Discovery", null, Modifier.padding(top = 10.dp), gap = 4.dp) }
+
             item {
                 ToggleRow(
                     label = "Catalog data (TMDB)",
@@ -85,7 +144,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     checked = null,
                     trailingText = if (isLive) "Change key" else "Add key",
                     onClick = { editingKey = true },
-                    modifier = Modifier.fillMaxWidth().focusRequester(first),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -152,6 +211,10 @@ fun SettingsScreen(vm: AppViewModel) {
 }
 
 private val Limitations = listOf(
+    "Real · Your Plex library and playback" to
+        "Browsing, artwork, Continue Watching and progress come straight from your Plex server. Files play in original quality (4K, HDR10, Dolby Vision, lossless audio passthrough) when this TV supports them, otherwise through Plex's transcoder.",
+    "Real · Per-title formats for your files" to
+        "4K, HDR10, Dolby Vision and Atmos badges on Plex titles are read from the file's own streams.",
     "Real · Catalog, artwork, trending, search" to
         "Live from TMDB once a key is set. Without one the app runs on a labeled sample catalog.",
     "Real · Which service has each title" to
@@ -159,11 +222,13 @@ private val Limitations = listOf(
     "Real · Opening the official app" to
         "Play hands off to the installed Netflix, Disney+, Prime Video, Apple TV, Max, Hulu, Paramount+ or Peacock app. Where the app accepts its own web links it opens on a search for the title; otherwise it opens the app's home. Exact episode deep links need each service's private content ids, which aren't public.",
     "Real · Your TV's 4K, HDR, Dolby Vision and Atmos support" to
-        "Read from the device. Per-service formats are the service's top tier (\"up to\"); per-title format data isn't in any public API.",
+        "Read from the device. For streaming services, formats are the service's top tier (\"up to\"); per-title format data isn't in any public API.",
     "Local · Watchlist and recommendations" to
         "Stored on this TV. Recommendations are built from your watchlist and recently opened titles, filtered to your services.",
-    "Limited · Continue Watching" to
-        "Services don't share watch progress with other apps, so this row shows titles you opened from Claude TV. In demo mode the progress bars are sample data.",
+    "Limited · Streaming services' watch progress" to
+        "Netflix, Disney+ and the rest don't share progress with other apps, so their titles can't appear in Continue Watching with progress. Plex titles do.",
+    "Not possible · Playing Netflix and other services inside Claude TV" to
+        "Their video is DRM-protected and licensed to play only in their own apps, so Play hands off to them.",
 )
 
 @Composable

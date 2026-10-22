@@ -38,6 +38,9 @@ import com.claudetv.hub.data.Title
 import com.claudetv.hub.ui.AppViewModel
 import com.claudetv.hub.ui.Loadable
 import com.claudetv.hub.ui.components.Chip
+import com.claudetv.hub.ui.components.PlexCard
+import com.claudetv.hub.ui.components.PlexCardStyle
+import com.claudetv.hub.data.plex.PlexType
 import com.claudetv.hub.ui.components.TitleCard
 import com.claudetv.hub.ui.components.TvKeyboard
 import com.claudetv.hub.ui.components.rememberPivotSpec
@@ -56,6 +59,7 @@ fun SearchScreen(vm: AppViewModel) {
     val results by vm.results.collectAsState()
     val offers by vm.offers.collectAsState()
     val home by vm.home.collectAsState()
+    val plexHits by vm.plexResults.collectAsState()
     var filter by remember { mutableStateOf(SearchFilter.ALL) }
     val keyRequester = remember { FocusRequester() }
 
@@ -83,7 +87,7 @@ fun SearchScreen(vm: AppViewModel) {
                 firstKeyRequester = keyRequester,
             )
             Spacer(Modifier.height(14.dp))
-            Text("One search across all your services. Titles in your subscriptions are listed first.", style = Type.CardMeta)
+            Text("One search across your Plex library and every service. Your library comes first, then titles included in your subscriptions.", style = Type.CardMeta)
         }
 
         Spacer(Modifier.width(32.dp))
@@ -117,7 +121,8 @@ fun SearchScreen(vm: AppViewModel) {
                     query.isBlank() -> "Trending Searches"
                     results is Loadable.Loading -> "Searching…"
                     results is Loadable.Failed -> "Search failed: ${(results as Loadable.Failed).message}"
-                    filtered.isNullOrEmpty() -> "No results for “$query”"
+                    filtered.isNullOrEmpty() && plexHits.isEmpty() -> "No results for “$query”"
+                    plexHits.isNotEmpty() -> "Your library first, then everywhere else"
                     else -> "Results for “$query”"
                 },
                 style = Type.RowTitle,
@@ -131,6 +136,24 @@ fun SearchScreen(vm: AppViewModel) {
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp, start = 8.dp, end = 8.dp),
                 ) {
+                    val plexFiltered = if (query.isBlank()) emptyList() else plexHits.filter { p ->
+                        when (filter) {
+                            SearchFilter.MOVIES -> p.type == PlexType.MOVIE
+                            SearchFilter.SHOWS -> p.type != PlexType.MOVIE
+                            else -> true
+                        }
+                    }
+                    items(plexFiltered, key = { it.key }) { p ->
+                        val key = "search/${p.key}"
+                        PlexCard(
+                            vm = vm,
+                            item = p,
+                            style = PlexCardStyle.POSTER,
+                            focusKey = key,
+                            width = 124.dp,
+                            onClick = { vm.openPlex(p, key) },
+                        )
+                    }
                     items(filtered.orEmpty(), key = { it.key }) { t ->
                         val o = offers[t.key]
                         val included = vm.isIncluded(o) || (t.isDemo && t.demoService in vm.subscriptions.value)

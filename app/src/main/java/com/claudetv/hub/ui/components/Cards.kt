@@ -71,7 +71,7 @@ fun Artwork(title: Title, style: RowStyle, modifier: Modifier = Modifier, hero: 
 }
 
 @Composable
-private fun GeneratedArt(title: Title, style: RowStyle, hero: Boolean) {
+fun GeneratedArt(title: Title, style: RowStyle, hero: Boolean) {
     val base = Color(title.demoService?.brandColor ?: 0xFF3A3A48)
     val h = (title.name.hashCode() and 0xFFFFFF)
     val tint = Color(0xFF000000 or h.toLong()).copy(alpha = 1f)
@@ -113,10 +113,7 @@ private fun lerpColor(a: Color, b: Color, t: Float) = Color(
     alpha = 1f,
 )
 
-/**
- * A focusable title card. Focus lifts the card, adds a bright edge and brightens the caption,
- * like tvOS.
- */
+/** A streaming title on a glass card. */
 @Composable
 fun TitleCard(
     title: Title,
@@ -131,109 +128,43 @@ fun TitleCard(
     progress: Float? = null,
     width: androidx.compose.ui.unit.Dp = if (style == RowStyle.POSTER) Dimens.PosterCardWidth else Dimens.LandscapeCardWidth,
 ) {
-    var focused by remember { mutableStateOf(false) }
-    val requester = remember { FocusRequester() }
-    RestoreFocusEffect(focusKey, requester)
-    val captionColor by animateColorAsState(
-        if (focused) Palette.TextPrimary else Palette.TextSecondary,
-        tween(Motion.FocusMillis), label = "caption",
-    )
-    val shape = RoundedCornerShape(Dimens.CardRadius)
-
-    Column(modifier.width(width)) {
-        Surface(
-            onClick = onClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(if (style == RowStyle.POSTER) 2f / 3f else 16f / 9f)
-                .focusRequester(requester)
-                .onFocusChanged {
-                    focused = it.isFocused
-                    if (it.isFocused) onFocused()
-                },
-            shape = ClickableSurfaceDefaults.shape(shape = shape),
-            colors = ClickableSurfaceDefaults.colors(
-                containerColor = Palette.Surface,
-                focusedContainerColor = Palette.Surface,
-                pressedContainerColor = Palette.Surface,
-            ),
-            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f, pressedScale = 1.04f),
-            border = ClickableSurfaceDefaults.border(
-                focusedBorder = Border(BorderStroke(2.5.dp, Palette.Focus.copy(alpha = 0.9f)), shape = shape),
-            ),
-        ) {
-            Artwork(title, style, Modifier.fillMaxSize().clip(shape))
-            if (style != RowStyle.POSTER) {
-                // Bottom scrim keeps badges legible on bright artwork.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.65f))),
-                )
-            }
-            if (service != null || title.isDemo) {
+    val poster = style == RowStyle.POSTER
+    val url = if (poster) TmdbClient.poster(title.posterPath) else TmdbClient.backdrop(title.backdropPath) ?: TmdbClient.poster(title.posterPath)
+    GlassCard(
+        onClick = onClick,
+        imageUrl = url,
+        aspectRatio = if (poster) 2f / 3f else 16f / 9f,
+        width = width,
+        focusKey = focusKey,
+        modifier = modifier,
+        title = title.name,
+        subtitle = caption ?: listOfNotNull(title.year, title.type.label).joinToString(" · "),
+        progress = progress,
+        onFocused = onFocused,
+        fallback = { GeneratedArt(title, style, hero = false) },
+        overlay = {
+            if (service != null || title.isDemo || included) {
                 Row(
                     Modifier.align(Alignment.TopStart).padding(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     service?.let { ServiceBadge(it, compact = true) }
-                    if (title.isDemo && style != RowStyle.POSTER) DemoBadge()
+                    if (title.isDemo && !poster) DemoBadge()
                 }
             }
-            if (included) {
-                Text(
-                    "INCLUDED",
-                    style = Type.Badge.copy(color = Palette.Included),
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(5.dp))
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                )
-            }
-            if (progress != null) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.25f)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress.coerceIn(0.02f, 1f))
-                            .height(4.dp)
-                            .background(Color.White),
-                    )
+            if (included && !poster) {
+                GlassChip(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                    Text("INCLUDED", style = Type.Badge.copy(color = Palette.Included))
                 }
             }
-        }
-        Spacer(Modifier.height(if (focused) 14.dp else 9.dp))
-        Text(
-            title.name,
-            style = Type.CardTitle.copy(color = captionColor),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        val meta = caption ?: listOfNotNull(title.year, title.type.label).joinToString(" · ")
-        if (meta.isNotEmpty()) {
-            Text(meta, style = Type.CardMeta, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
+        },
+    )
 }
 
-/** Small pill naming the service, tinted with its brand colour. */
+/** Small frosted pill naming the service, with a dot in its brand colour. */
 @Composable
 fun ServiceBadge(service: StreamingService, compact: Boolean = false, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(6.dp))
-            .padding(horizontal = if (compact) 7.dp else 10.dp, vertical = if (compact) 3.dp else 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    GlassChip(modifier) {
         Box(
             Modifier
                 .width(if (compact) 6.dp else 8.dp)
@@ -250,11 +181,5 @@ fun ServiceBadge(service: StreamingService, compact: Boolean = false, modifier: 
 
 @Composable
 fun DemoBadge(modifier: Modifier = Modifier) {
-    Text(
-        "SAMPLE",
-        style = Type.Badge.copy(color = Palette.Demo),
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-    )
+    GlassChip(modifier) { Text("SAMPLE", style = Type.Badge.copy(color = Palette.Demo)) }
 }

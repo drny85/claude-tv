@@ -3,7 +3,6 @@ package com.claudetv.hub.ui.screens
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -39,6 +38,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,9 +53,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -68,18 +67,30 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.claudetv.hub.data.ContentRow
 import com.claudetv.hub.data.DemoCatalog
-import com.claudetv.hub.data.HeroItem
 import com.claudetv.hub.data.HomeData
 import com.claudetv.hub.data.RowStyle
+import com.claudetv.hub.data.StreamingService
 import com.claudetv.hub.data.Title
 import com.claudetv.hub.data.TmdbClient
+import com.claudetv.hub.data.VideoFormat
+import com.claudetv.hub.data.plex.PlexItem
+import com.claudetv.hub.data.plex.PlexType
 import com.claudetv.hub.ui.AppViewModel
 import com.claudetv.hub.ui.Loadable
-import com.claudetv.hub.ui.components.Artwork
+import com.claudetv.hub.ui.PlexHome
+import com.claudetv.hub.ui.components.AmbientBackdrop
 import com.claudetv.hub.ui.components.CardExtras
+import com.claudetv.hub.ui.components.CinematicScrims
+import com.claudetv.hub.ui.components.DemoBadge
+import com.claudetv.hub.ui.components.FormatRow
+import com.claudetv.hub.ui.components.GlassChip
 import com.claudetv.hub.ui.components.PillButton
+import com.claudetv.hub.ui.components.PlexCardStyle
+import com.claudetv.hub.ui.components.PlexRow
 import com.claudetv.hub.ui.components.ServiceBadge
 import com.claudetv.hub.ui.components.TitleRow
+import com.claudetv.hub.ui.components.glass
+import com.claudetv.hub.ui.components.px
 import com.claudetv.hub.ui.components.rememberPivotSpec
 import com.claudetv.hub.ui.components.safeRequest
 import com.claudetv.hub.ui.theme.Dimens
@@ -90,6 +101,36 @@ import kotlinx.coroutines.android.awaitFrame
 
 private val HeroHeight = 448.dp
 
+/** One page of the hero carousel, from either your Plex library or the streaming catalog. */
+private data class HeroSlide(
+    val key: String,
+    val title: String,
+    val artUrl: String?,
+    val logoUrl: String?,
+    val meta: String,
+    val overview: String,
+    val service: StreamingService?,
+    val fromLibrary: Boolean,
+    val isDemo: Boolean,
+    val formats: Set<VideoFormat>,
+    val primaryLabel: String,
+    val onPrimary: () -> Unit,
+    val secondaryLabel: String?,
+    val secondaryIcon: ImageVector?,
+    val onSecondary: (() -> Unit)?,
+    val onInfo: () -> Unit,
+    val streamTitle: Title?,
+)
+
+/** Rows on Home, in order. */
+private sealed interface HomeRow {
+    val id: String
+    data class Plex(override val id: String, val title: String, val subtitle: String?, val items: List<PlexItem>, val style: PlexCardStyle) : HomeRow
+    data class Stream(override val id: String, val row: ContentRow) : HomeRow
+    data object PlexPromo : HomeRow { override val id = "plex_promo" }
+    data object DemoNote : HomeRow { override val id = "demo_note" }
+}
+
 @Composable
 fun HomeScreen(
     vm: AppViewModel,
@@ -97,15 +138,16 @@ fun HomeScreen(
     handlesBack: Boolean,
 ) {
     val state by vm.home.collectAsState()
+    val plexHome by vm.plexHome.collectAsState()
+    val plexData = (plexHome as? Loadable.Ready)?.value
     when (val s = state) {
-        is Loadable.Loading -> HomeSkeleton()
-        is Loadable.Failed -> CenteredMessage(
-            "Couldn't load your catalog",
-            s.message,
-            action = "Try Again",
-            onAction = vm::loadHome,
-        )
-        is Loadable.Ready -> HomeContent(vm, s.value, onChromeVisible, handlesBack)
+        is Loadable.Loading -> if (plexData != null) HomeContent(vm, HomeData(emptyList(), emptyList()), plexData, onChromeVisible, handlesBack) else HomeSkeleton()
+        is Loadable.Failed -> if (plexData != null) {
+            HomeContent(vm, HomeData(emptyList(), emptyList()), plexData, onChromeVisible, handlesBack)
+        } else {
+            CenteredMessage("Couldn't load your catalog", s.message, action = "Try Again", onAction = vm::loadHome)
+        }
+        is Loadable.Ready -> HomeContent(vm, s.value, plexData, onChromeVisible, handlesBack)
     }
 }
 
@@ -114,6 +156,7 @@ fun HomeScreen(
 private fun HomeContent(
     vm: AppViewModel,
     data: HomeData,
+    plex: PlexHome?,
     onChromeVisible: (Boolean) -> Unit,
     handlesBack: Boolean,
 ) {
@@ -121,17 +164,78 @@ private fun HomeContent(
     val watchlist by vm.watchlist.collectAsState()
     val recents by vm.recents.collectAsState()
     val isLive by vm.isLive.collectAsState()
+    val plexState by vm.plexState.collectAsState()
 
     var heroExpanded by remember { mutableStateOf(true) }
     var heroIndex by remember { mutableIntStateOf(0) }
-    var ambient by remember { mutableStateOf<Title?>(null) }
+    var ambientUrl by remember { mutableStateOf<String?>(null) }
+    var ambientPreBlurred by remember { mutableStateOf(false) }
     var focusedRow by remember { mutableIntStateOf(-1) }
     var pendingHeroFocus by remember { mutableStateOf(false) }
     val playRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
-    val hero = data.hero
-    val current: HeroItem? = hero.getOrNull(heroIndex % hero.size.coerceAtLeast(1))
+    val screenW = px(960.dp)
+    val screenH = px(540.dp)
+
+    // ---------- hero slides ----------
+    val slides: List<HeroSlide> = if (plex != null && plex.hero.isNotEmpty()) {
+        plex.hero.map { item ->
+            val resume = (item.viewOffsetMs ?: 0L) > 0
+            HeroSlide(
+                key = item.key,
+                title = item.title,
+                artUrl = vm.plexImage(item.art, screenW, screenH),
+                logoUrl = vm.plexImage(item.logo, px(400.dp), px(120.dp)),
+                meta = listOfNotNull(
+                    item.year?.toString(),
+                    if (item.type == PlexType.SHOW) item.leafCount?.let { "$it episodes" } else item.durationMs?.let { formatRuntime(it) },
+                    item.contentRating,
+                    item.rating?.let { "★ %.1f".format(it) },
+                ).joinToString("  ·  "),
+                overview = item.summary,
+                service = null,
+                fromLibrary = true,
+                isDemo = false,
+                formats = item.quickFormats,
+                primaryLabel = when {
+                    item.type == PlexType.SHOW -> "Play"
+                    resume -> "Resume"
+                    else -> "Play"
+                },
+                onPrimary = { vm.playPlex(item) },
+                secondaryLabel = null,
+                secondaryIcon = null,
+                onSecondary = null,
+                onInfo = { vm.openPlex(item, null) },
+                streamTitle = null,
+            )
+        }
+    } else {
+        data.hero.map { h ->
+            val inList = watchlist.any { it.key == h.title.key }
+            HeroSlide(
+                key = h.title.key,
+                title = h.title.name,
+                artUrl = TmdbClient.heroBackdrop(h.title.backdropPath),
+                logoUrl = TmdbClient.logo(h.logoPath),
+                meta = listOfNotNull(h.title.year, h.title.type.label, h.title.rating?.let { "★ %.1f".format(it) }).joinToString("  ·  "),
+                overview = h.title.overview,
+                service = h.service,
+                fromLibrary = false,
+                isDemo = h.title.isDemo,
+                formats = emptySet(),
+                primaryLabel = h.service?.let { "Play on ${it.displayName}" } ?: "View Details",
+                onPrimary = { h.service?.let { s -> vm.play(h.title, s) } ?: vm.openDetails(h.title, null) },
+                secondaryLabel = if (inList) "In Watchlist" else "Watchlist",
+                secondaryIcon = if (inList) Icons.Filled.Check else Icons.Filled.Add,
+                onSecondary = { vm.toggleWatchlist(h.title) },
+                onInfo = { vm.openDetails(h.title, null) },
+                streamTitle = h.title,
+            )
+        }
+    }
+    val current: HeroSlide? = slides.getOrNull(heroIndex % slides.size.coerceAtLeast(1))
 
     LaunchedEffect(heroExpanded) { onChromeVisible(heroExpanded) }
     // Only on app launch; coming back via the tab bar leaves focus on the tab bar.
@@ -149,11 +253,10 @@ private fun HomeContent(
             pendingHeroFocus = false
         }
     }
-    // Auto-advance the hero like the Apple TV app; resets whenever the person moves through it.
-    LaunchedEffect(heroIndex, heroExpanded, hero.size) {
-        if (heroExpanded && hero.size > 1) {
+    LaunchedEffect(heroIndex, heroExpanded, slides.size) {
+        if (heroExpanded && slides.size > 1) {
             kotlinx.coroutines.delay(9_000)
-            heroIndex = (heroIndex + 1) % hero.size
+            heroIndex = (heroIndex + 1) % slides.size
         }
     }
     BackHandler(enabled = handlesBack && !heroExpanded) {
@@ -161,40 +264,43 @@ private fun HomeContent(
         pendingHeroFocus = true
     }
 
-    val rows: List<ContentRow> = buildList {
-        val cont = if (isLive) {
-            recents.map { it.title }
-        } else {
-            DemoCatalog.sampleContinue.map { it.first }
+    // ---------- rows ----------
+    val rows: List<HomeRow> = buildList {
+        if (plex != null) {
+            if (plex.onDeck.isNotEmpty()) add(HomeRow.Plex("deck", "Continue Watching", null, plex.onDeck, PlexCardStyle.LANDSCAPE))
+            if (plex.recentMovies.isNotEmpty()) add(HomeRow.Plex("recent_movies", "Recently Added Movies", null, plex.recentMovies, PlexCardStyle.POSTER))
+            if (plex.recentShows.isNotEmpty()) add(HomeRow.Plex("recent_shows", "Recently Added TV", null, plex.recentShows, PlexCardStyle.POSTER))
+        } else if (plexState !is com.claudetv.hub.data.plex.PlexState.Connecting) {
+            add(HomeRow.PlexPromo)
         }
-        if (cont.isNotEmpty()) add(ContentRow("continue", "Continue Watching",
-            if (isLive) "Titles you opened from Claude TV" else "Sample progress: streaming services don't share watch progress",
-            cont, RowStyle.LANDSCAPE))
-        data.rows.firstOrNull()?.let { add(it) }
-        if (watchlist.isNotEmpty()) add(ContentRow("watchlist", "Up Next from Your Watchlist", null, watchlist, RowStyle.LANDSCAPE))
-        addAll(data.rows.drop(1))
+        if (!isLive) add(HomeRow.DemoNote)
+        if (plex == null) {
+            val cont = if (isLive) recents.map { it.title } else DemoCatalog.sampleContinue.map { it.first }
+            if (cont.isNotEmpty()) add(HomeRow.Stream("continue", ContentRow("continue", "Continue Watching",
+                if (isLive) "Titles you opened from Claude TV" else "Sample progress: streaming apps don't share watch progress",
+                cont, RowStyle.LANDSCAPE)))
+        }
+        data.rows.firstOrNull()?.let { add(HomeRow.Stream(it.id, if (plex != null) it.copy(title = "Discover on Your Services") else it)) }
+        if (watchlist.isNotEmpty()) add(HomeRow.Stream("watchlist", ContentRow("watchlist", "Your Watchlist", null, watchlist, RowStyle.LANDSCAPE)))
+        data.rows.drop(1).forEach { add(HomeRow.Stream(it.id, it)) }
+        if (plex != null && isLive && recents.isNotEmpty()) {
+            add(HomeRow.Stream("continue", ContentRow("continue", "Recently Opened in Apps", null, recents.map { it.title }, RowStyle.LANDSCAPE)))
+        }
     }
     val recentByKey = recents.associateBy { it.title.key }
     val demoProgress = DemoCatalog.sampleContinue.associate { it.first.key to it.second }
+    val ambientW = px(480.dp)
+    val ambientH = px(270.dp)
 
     Box(Modifier.fillMaxSize()) {
-        // ---- Ambient backdrop: the hero, or the focused title once you're browsing rows ----
-        val backdropTitle = if (heroExpanded) current?.title else (ambient ?: current?.title)
-        val dim by animateFloatAsState(if (heroExpanded) 0f else 0.62f, tween(600, easing = Motion.Ease), label = "dim")
-        Crossfade(targetState = backdropTitle, animationSpec = tween(700), label = "backdrop") { t ->
-            if (t != null) Artwork(t, RowStyle.LANDSCAPE, Modifier.fillMaxSize(), hero = true)
+        // ---- Backdrop: the sharp hero art, or the focused title frosted once you're browsing ----
+        val dim by animateFloatAsState(if (heroExpanded) 0f else 0.45f, tween(600, easing = Motion.Ease), label = "dim")
+        if (heroExpanded || ambientUrl == null) {
+            AmbientBackdrop(current?.artUrl, dim = dim)
+        } else {
+            AmbientBackdrop(ambientUrl, blurred = true, alreadyBlurred = ambientPreBlurred, dim = dim)
         }
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(0f to Palette.Background.copy(alpha = 0.92f), 0.42f to Palette.Background.copy(alpha = 0.45f), 0.75f to Color.Transparent),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(0.35f to Color.Transparent, 0.82f to Palette.Background.copy(alpha = 0.9f), 1f to Palette.Background),
-            ),
-        )
+        CinematicScrims()
 
         Column(Modifier.fillMaxSize()) {
             val heroH by animateDpAsState(if (heroExpanded) HeroHeight else 0.dp, tween(520, easing = Motion.Ease), label = "heroH")
@@ -210,21 +316,20 @@ private fun HomeContent(
                 if (current != null) {
                     Box(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Bottom, unbounded = true).height(HeroHeight).align(Alignment.BottomStart)) {
                         HeroContent(
-                            vm = vm,
-                            item = current,
+                            slide = current,
                             index = heroIndex,
-                            count = hero.size,
-                            inWatchlist = watchlist.any { it.key == current.title.key },
+                            count = slides.size,
                             focusable = heroExpanded,
                             playRequester = playRequester,
-                            onPrev = { if (hero.isNotEmpty()) heroIndex = (heroIndex - 1 + hero.size) % hero.size },
-                            onNext = { if (hero.isNotEmpty()) heroIndex = (heroIndex + 1) % hero.size },
+                            tvFormats = vm.capabilities.formats,
+                            onPrev = { if (slides.isNotEmpty()) heroIndex = (heroIndex - 1 + slides.size) % slides.size },
+                            onNext = { if (slides.isNotEmpty()) heroIndex = (heroIndex + 1) % slides.size },
                         )
                     }
                 }
             }
 
-            CompositionLocalProviderPivot {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides rememberPivotSpec(0f, 78.dp)) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -239,23 +344,42 @@ private fun HomeContent(
                     contentPadding = PaddingValues(top = 6.dp, bottom = 60.dp),
                     verticalArrangement = Arrangement.spacedBy(Dimens.RowGap),
                 ) {
-                    if (!isLive) item(key = "demo") { DemoBanner() }
                     itemsIndexed(rows, key = { _, r -> r.id }) { i, row ->
-                        TitleRow(
-                            row = row,
-                            offers = offers,
-                            isIncluded = vm::isIncluded,
-                            onOpen = { t, key -> vm.openDetails(t, key) },
-                            onFocused = { t -> ambient = t; vm.onCardFocused(t) },
-                            modifier = Modifier.onFocusChanged {
-                                if (it.hasFocus) {
-                                    focusedRow = i
-                                    heroExpanded = false
-                                }
-                            },
-                            extras = { t ->
-                                when (row.id) {
-                                    "continue" -> if (isLive) {
+                        val rowMod = Modifier.onFocusChanged {
+                            if (it.hasFocus) {
+                                focusedRow = i
+                                heroExpanded = false
+                            }
+                        }
+                        when (row) {
+                            is HomeRow.Plex -> PlexRow(
+                                vm = vm,
+                                rowId = row.id,
+                                title = row.title,
+                                subtitle = row.subtitle,
+                                items = row.items,
+                                style = row.style,
+                                onOpen = { item, key -> vm.openPlex(item, key) },
+                                onFocused = { item ->
+                                    ambientUrl = vm.plexImage(item.art ?: item.showArt ?: item.thumb, ambientW, ambientH, blur = 60)
+                                    ambientPreBlurred = true
+                                },
+                                modifier = rowMod,
+                            )
+                            is HomeRow.Stream -> TitleRow(
+                                row = row.row,
+                                offers = offers,
+                                isIncluded = vm::isIncluded,
+                                onOpen = { t, key -> vm.openDetails(t, key) },
+                                onFocused = { t ->
+                                    ambientUrl = TmdbClient.image(t.backdropPath ?: t.posterPath, "w780")
+                                    ambientPreBlurred = false
+                                    vm.onCardFocused(t)
+                                },
+                                modifier = rowMod,
+                                extras = { t ->
+                                    if (row.row.id != "continue") null
+                                    else if (isLive) {
                                         val r = recentByKey[t.key]
                                         CardExtras(
                                             service = r?.service,
@@ -269,10 +393,11 @@ private fun HomeContent(
                                     } else {
                                         CardExtras(service = t.demoService, progress = demoProgress[t.key], caption = "Sample progress")
                                     }
-                                    else -> null
-                                }
-                            },
-                        )
+                                },
+                            )
+                            HomeRow.PlexPromo -> PlexPromo(onConnect = vm::startPlexLink, modifier = rowMod)
+                            HomeRow.DemoNote -> DemoBanner()
+                        }
                     }
                     item(key = "footer") { Attribution(isLive) }
                 }
@@ -281,25 +406,14 @@ private fun HomeContent(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun CompositionLocalProviderPivot(content: @Composable () -> Unit) {
-    // Focused rows settle a fixed distance from the top so the row title always shows.
-    androidx.compose.runtime.CompositionLocalProvider(
-        LocalBringIntoViewSpec provides rememberPivotSpec(0f, 78.dp),
-        content = content,
-    )
-}
-
 @Composable
 private fun HeroContent(
-    vm: AppViewModel,
-    item: HeroItem,
+    slide: HeroSlide,
     index: Int,
     count: Int,
-    inWatchlist: Boolean,
     focusable: Boolean,
     playRequester: FocusRequester,
+    tvFormats: Set<VideoFormat>,
     onPrev: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -311,7 +425,8 @@ private fun HeroContent(
         verticalArrangement = Arrangement.Bottom,
     ) {
         AnimatedContent(
-            targetState = item,
+            targetState = slide,
+            contentKey = { it.key },
             transitionSpec = {
                 (fadeIn(tween(500, 150)) + slideInHorizontally(tween(600, easing = Motion.Ease)) { it / 14 })
                     .togetherWith(fadeOut(tween(250)))
@@ -319,72 +434,74 @@ private fun HeroContent(
             label = "hero",
         ) { h ->
             Column(Modifier.width(560.dp)) {
-                if (h.logoPath != null) {
+                if (h.fromLibrary) {
+                    GlassChip { Text("YOUR LIBRARY", style = Type.Badge.copy(color = Palette.TextPrimary)) }
+                    Spacer(Modifier.height(12.dp))
+                }
+                if (h.logoUrl != null) {
                     AsyncImage(
-                        model = TmdbClient.logo(h.logoPath),
-                        contentDescription = h.title.name,
+                        model = h.logoUrl,
+                        contentDescription = h.title,
                         contentScale = ContentScale.Fit,
                         alignment = Alignment.BottomStart,
                         modifier = Modifier.heightIn(max = 116.dp).widthIn(max = 400.dp),
                     )
                 } else {
-                    Text(h.title.name, style = Type.HeroTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(h.title, style = Type.HeroTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     h.service?.let { ServiceBadge(it) }
-                    val meta = listOfNotNull(
-                        h.title.year,
-                        h.title.type.label,
-                        h.title.rating?.let { "★ %.1f".format(it) },
-                    ).joinToString("  ·  ")
-                    Text(meta, style = Type.Meta)
-                    if (h.title.isDemo) com.claudetv.hub.ui.components.DemoBadge()
+                    Text(h.meta, style = Type.Meta)
+                    FormatRow(h.formats, tvFormats)
+                    if (h.isDemo) DemoBadge()
                 }
                 Spacer(Modifier.height(10.dp))
-                Text(h.title.overview, style = Type.Body, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(h.overview, style = Type.Body, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.height(20.dp))
         // Buttons stay outside AnimatedContent so focus survives slide changes.
+        val lastIndex = if (slide.onSecondary != null) 2 else 1
         Row(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.onPreviewKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when {
                     e.key == Key.DirectionLeft && focusedButton == 0 -> { onPrev(); true }
-                    e.key == Key.DirectionRight && focusedButton == 2 -> { onNext(); true }
+                    e.key == Key.DirectionRight && focusedButton == lastIndex -> { onNext(); true }
                     else -> false
                 }
             },
         ) {
-            val service = item.service
             PillButton(
-                text = service?.let { "Play on ${it.displayName}" } ?: "View Details",
+                text = slide.primaryLabel,
                 icon = Icons.Filled.PlayArrow,
                 primary = true,
-                onClick = { if (service != null) vm.play(item.title, service) else vm.openDetails(item.title, null) },
+                onClick = slide.onPrimary,
                 modifier = Modifier
                     .focusRequester(playRequester)
                     .focusProperties { canFocus = focusable }
                     .onFocusChanged { if (it.isFocused) focusedButton = 0 },
             )
-            PillButton(
-                text = if (inWatchlist) "In Watchlist" else "Watchlist",
-                icon = if (inWatchlist) Icons.Filled.Check else Icons.Filled.Add,
-                onClick = { vm.toggleWatchlist(item.title) },
-                modifier = Modifier
-                    .focusProperties { canFocus = focusable }
-                    .onFocusChanged { if (it.isFocused) focusedButton = 1 },
-            )
+            if (slide.onSecondary != null) {
+                PillButton(
+                    text = slide.secondaryLabel,
+                    icon = slide.secondaryIcon,
+                    onClick = slide.onSecondary,
+                    modifier = Modifier
+                        .focusProperties { canFocus = focusable }
+                        .onFocusChanged { if (it.isFocused) focusedButton = 1 },
+                )
+            }
             PillButton(
                 text = null,
                 icon = Icons.Filled.Info,
-                onClick = { vm.openDetails(item.title, null) },
+                onClick = slide.onInfo,
                 contentPadding = PaddingValues(12.dp),
                 modifier = Modifier
                     .focusProperties { canFocus = focusable }
-                    .onFocusChanged { if (it.isFocused) focusedButton = 2 },
+                    .onFocusChanged { if (it.isFocused) focusedButton = lastIndex },
             )
         }
         Spacer(Modifier.height(18.dp))
@@ -406,16 +523,35 @@ private fun HeroContent(
 }
 
 @Composable
+private fun PlexPromo(onConnect: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .padding(horizontal = Dimens.ScreenH)
+            .fillMaxWidth()
+            .glass(RoundedCornerShape(20.dp))
+            .padding(horizontal = 24.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Bring your Plex library home", style = Type.RowTitle)
+            Text("Sign in once and your movies and shows play right here in full 4K, HDR and Dolby Vision.", style = Type.RowSubtitle)
+        }
+        Spacer(Modifier.width(20.dp))
+        PillButton("Connect Plex", onClick = onConnect, primary = true, icon = Icons.Filled.PlayArrow)
+    }
+}
+
+@Composable
 private fun DemoBanner() {
     Row(
         Modifier
             .padding(horizontal = Dimens.ScreenH)
-            .background(Palette.Demo.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .glass(RoundedCornerShape(14.dp), tint = 0.04f)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Demo mode: you're seeing sample data. Add a free TMDB API key in Settings to load the live catalog and real availability.",
+            "Streaming discovery is in demo mode. Add a free TMDB API key in Settings for the live catalog.",
             style = Type.Meta.copy(color = Palette.Demo),
         )
     }
@@ -437,15 +573,20 @@ private fun HomeSkeleton() {
         Modifier.fillMaxSize().padding(start = Dimens.ScreenH, top = 300.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.width(320.dp).height(36.dp).background(Palette.Surface, RoundedCornerShape(8.dp)))
-        Box(Modifier.width(460.dp).height(14.dp).background(Palette.Surface, RoundedCornerShape(4.dp)))
+        Box(Modifier.width(320.dp).height(36.dp).glass(RoundedCornerShape(8.dp)))
+        Box(Modifier.width(460.dp).height(14.dp).glass(RoundedCornerShape(4.dp)))
         Spacer(Modifier.height(30.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(Dimens.CardGap)) {
             repeat(5) {
-                Box(Modifier.width(Dimens.LandscapeCardWidth).height(133.dp).background(Palette.Surface, RoundedCornerShape(Dimens.CardRadius)))
+                Box(Modifier.width(Dimens.LandscapeCardWidth).height(133.dp).glass(RoundedCornerShape(16.dp)))
             }
         }
     }
+}
+
+fun formatRuntime(ms: Long): String {
+    val m = ms / 60_000
+    return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
 }
 
 @Composable
