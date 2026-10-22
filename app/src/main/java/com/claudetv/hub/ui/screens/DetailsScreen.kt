@@ -93,17 +93,12 @@ fun DetailsScreen(vm: AppViewModel, title: Title) {
             .focusProperties { exit = { FocusRequester.Cancel } }
             .focusGroup(),
     ) {
-        Artwork(title, RowStyle.LANDSCAPE, Modifier.fillMaxSize(), hero = true)
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(0f to Palette.Background, 0.5f to Palette.Background.copy(alpha = 0.6f), 0.85f to Color.Transparent),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(0.3f to Color.Transparent, 0.85f to Palette.Background),
-            ),
-        )
+        if (title.backdropPath != null) {
+            com.claudetv.hub.ui.components.AmbientBackdrop(TmdbClient.heroBackdrop(title.backdropPath))
+        } else {
+            Artwork(title, RowStyle.LANDSCAPE, Modifier.fillMaxSize(), hero = true)
+        }
+        com.claudetv.hub.ui.components.CinematicScrims()
         when (val s = state) {
             is Loadable.Loading -> Column(Modifier.padding(start = Dimens.ScreenH, top = 300.dp)) {
                 Text(title.name, style = Type.HeroTitle)
@@ -280,7 +275,7 @@ private fun OfferTile(o: Offer, included: Boolean, onClick: () -> Unit) {
             focusedContentColor = Palette.OnFocus,
         ),
         border = ClickableSurfaceDefaults.border(
-            border = Border(BorderStroke(1.dp, if (included) Palette.Included.copy(alpha = 0.7f) else Color.Transparent), shape = shape),
+            border = Border(if (included) BorderStroke(1.dp, Palette.Included.copy(alpha = 0.7f)) else com.claudetv.hub.ui.components.glassEdge(), shape = shape),
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
     ) {

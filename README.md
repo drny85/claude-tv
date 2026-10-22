@@ -1,24 +1,35 @@
 # Claude TV
 
-A native Google TV / Android TV app that puts all your streaming services in one Apple TV–style home screen. Built in Kotlin with Jetpack Compose for TV, tuned for a TCL 98" 4K Google TV and the D-pad remote.
+A native Google TV / Android TV app that puts your Plex library and all your streaming services in one Apple TV–style home screen. Built in Kotlin with Jetpack Compose for TV, tuned for a TCL 98" 4K Google TV and the D-pad remote.
 
 ## What's in the app
 
+Four tabs, nothing more: **Home · Library · Search · Settings**.
+
 | Screen | What it does |
 | --- | --- |
-| **Home** | Full-bleed hero carousel (top title from each of your services, with title logos), Continue Watching, Top Picks for You, Up Next from your Watchlist, Trending, Popular on each service, Critically Acclaimed. The backdrop follows whatever card you focus. |
-| **Search** | One search across every service with a remote-friendly keyboard. Titles included in your subscriptions are listed first; filter by Included, Movies or Series. |
-| **Details** | Logo, metadata, rating, cast, trailer, every way to watch (included / free / rent / buy), picture and sound formats, More Like This. |
-| **Watchlist** | One watchlist for everything, stored on the TV. |
-| **Services** | Toggle which services you pay for; see which apps are installed; open any of them. |
-| **Settings** | TMDB key, region, your TV's detected 4K / HDR / Dolby Vision / Atmos support, and the "real vs simulated" list below. |
+| **Home** | Full-bleed hero of what's new in your Plex library, then Continue Watching (real progress from Plex), Recently Added Movies and TV, and streaming discovery: Top Picks on your services, your Watchlist, Trending, Popular on each service. The backdrop frosts to whatever card you focus. |
+| **Library** | Your Plex Movies and TV libraries as a poster wall with sorting (Recently Added, A–Z, Release Date, Top Rated) and an Unwatched filter. |
+| **Plex details** | Logo, metadata, real 4K / HDR10 / Dolby Vision / Atmos badges read from your file, Resume or Play from Beginning, Mark Watched, seasons and episodes. |
+| **Player** | Plays the original file in the app (direct play) so 4K, HDR10, Dolby Vision and lossless audio passthrough are preserved. Falls back to Plex's transcoder if the TV can't decode a file. Syncs your position back to Plex and autoplays the next episode. |
+| **Search** | One search across your Plex library and every streaming service. Your library first, then titles included in your subscriptions. |
+| **Streaming details** | Every way to watch (included / free / rent / buy), trailer, and a Play button that opens the right app. |
+| **Settings** | Plex sign-in and server, which services you pay for, TMDB key, region, your TV's detected 4K / HDR / Dolby Vision / Atmos support, and the "real vs simulated" list below. |
 
-Supported services: Netflix, Disney+, Prime Video, Apple TV+, Max, Hulu, Paramount+, Peacock (plus Google TV for rentals).
+Design: a near-black cinematic canvas where artwork supplies the colour, glass media cards (a faint diagonal sheen and a light-catching hairline edge that brighten and lift on focus), frosted panels and chips, and calm pivot scrolling tuned for the D-pad.
+
+## Connect Plex
+
+Library → **Connect Plex** (or Settings → Plex). The TV shows a 4-character code; enter it at **plex.tv/link** on your phone. Claude TV finds your servers, picks the fastest address (local network first) and remembers it. Your Plex password is never typed on the TV.
 
 ## What's real and what's simulated
 
 | Feature | Status | Notes |
 | --- | --- | --- |
+| Plex library, artwork, Continue Watching | **Real** | Straight from your Plex Media Server. |
+| Plex playback in the app | **Real** | Original-quality direct play, transcode fallback, progress synced to Plex. |
+| Plex per-title 4K / HDR / Dolby Vision / Atmos | **Real** | Read from the file's video and audio streams. |
+| Playing Netflix, Disney+, etc. inside the app | **Not possible** | Their video is DRM-protected and licensed only to their own apps, so Play hands off to them. |
 | Catalog, artwork, trending, search | **Real** (with TMDB key) | Live from [TMDB](https://www.themoviedb.org/). Without a key the app runs on a clearly labeled sample catalog. |
 | Which service has each title | **Real** | TMDB watch-provider data (powered by JustWatch), per region: included, free, rent, buy. |
 | Prioritizing your subscriptions | **Real** | Hero, Top Picks, service rows and search ranking all use the services you toggle on. |
@@ -27,7 +38,7 @@ Supported services: Netflix, Disney+, Prime Video, Apple TV+, Max, Hulu, Paramou
 | Per-title 4K / Dolby Vision / Atmos | **Approximated** | Shown as "up to" the service's top tier. No public API lists formats per title. |
 | Watchlist | **Real, local** | Stored on the TV. Services' own lists (e.g. Netflix My List) can't be read by other apps. |
 | Recommendations | **Real, local** | Built from your watchlist and recently opened titles, filtered to your services. |
-| Continue Watching | **Limited** | Services don't share watch progress with third-party apps, so this row shows titles you opened from Claude TV. Demo mode shows sample progress bars. |
+| Streaming services' watch progress | **Limited** | Services don't share watch progress with third-party apps. Without Plex, Continue Watching shows titles you opened from Claude TV (sample progress in demo mode). |
 
 ## Install on your TCL Google TV
 
@@ -74,4 +85,4 @@ The APK is signed with `keystore/claudetv-sideload.jks`, a key only for personal
 
 ## Credits
 
-This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming availability data by JustWatch.
+This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming availability data by JustWatch. Plex is a trademark of Plex, Inc.; Claude TV is an unofficial client.
