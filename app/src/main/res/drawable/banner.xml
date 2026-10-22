@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="320" android:endY="180">
+                <item android:offset="0" android:color="#FF1B1B24" />
+                <item android:offset="1" android:color="#FF050507" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- play glyph in a rounded tile -->
+    <path android:fillColor="#FFF5F5F7" android:pathData="M58,62h56a12,12 0,0 1,12 12v32a12,12 0,0 1,-12 12h-56a12,12 0,0 1,-12 -12v-32a12,12 0,0 1,12 -12z" />
+    <path android:fillColor="#FF050507" android:pathData="M78,76 L102,90 L78,104 Z" />
+    <!-- wordmark: CLAUDE TV drawn as simple strokes is overkill; use bars as a minimal mark -->
+    <path android:fillColor="#FFF5F5F7" android:pathData="M142,78h132a4,4 0,0 1,4 4v0a4,4 0,0 1,-4 4h-132a4,4 0,0 1,-4 -4v0a4,4 0,0 1,4 -4z" />
+    <path android:fillColor="#99F5F5F7" android:pathData="M142,96h88a4,4 0,0 1,4 4v0a4,4 0,0 1,-4 4h-88a4,4 0,0 1,-4 -4v0a4,4 0,0 1,4 -4z" />
+</vector>
